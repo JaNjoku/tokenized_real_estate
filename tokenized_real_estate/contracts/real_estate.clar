@@ -118,3 +118,117 @@
         (ok (/ (- (get price property) maintenance-costs) (get total-shares property)))
     )
 )
+
+
+;; Public Functions
+
+(define-public (list-property 
+        (price uint)
+        (total-shares uint)
+        (property-address (string-ascii 100))
+        (property-details (string-ascii 500)))
+    (let
+        (
+            (property-id (var-get total-properties))
+            (block-height block-height)
+        )
+        (asserts! (> price u0) err-invalid-price)
+        (asserts! (> total-shares u0) err-invalid-price)
+        
+        ;; Check if map-insert was successful
+        (asserts! (map-insert properties property-id
+            {
+                owner: tx-sender,
+                price: price,
+                total-shares: total-shares,
+                available-shares: total-shares,
+                property-address: property-address,
+                property-details: property-details,
+                verified: false,
+                listed: true,
+                locked: false,
+                rental-income: u0,
+                last-maintenance: block-height,
+                creation-height: block-height
+            }) err-already-listed)
+        
+        ;; Update total properties counter
+        (var-set total-properties (+ property-id u1))
+        
+        ;; Set initial share holdings
+        (map-set share-holdings 
+            {property-id: property-id, holder: tx-sender}
+            total-shares)
+        
+        (ok property-id)
+    )
+)
+
+(define-public (record-rental-payment (property-id uint) (amount uint))
+    (let
+        (
+            (property (unwrap! (map-get? properties property-id) err-not-found))
+            (current-month (/ block-height u144)) ;; Approximate monthly blocks
+        )
+        ;; Check authorization
+        (asserts! (is-eq tx-sender (get owner property)) err-unauthorized)
+        
+        ;; Record the rental payment for current month
+        (map-set rental-payments 
+            {property-id: property-id, month: current-month}
+            amount)
+        
+        ;; Update total rental income in property details
+        (map-set properties property-id
+            (merge property {rental-income: (+ (get rental-income property) amount)}))
+        
+        (ok true)
+    )
+)
+
+(define-public (distribute-rental-income (property-id uint))
+    (let
+        (
+            (property (unwrap! (map-get? properties property-id) err-not-found))
+            (total-income (get rental-income property))
+            (total-shares (get total-shares property))
+            (holder-shares (get-share-balance property-id tx-sender))
+            (holder-share (/ (* total-income holder-shares) total-shares))
+        )
+        (asserts! (> holder-shares u0) err-unauthorized)
+        (try! (stx-transfer? holder-share contract-owner tx-sender))
+        (ok true)
+    )
+)
+
+(define-public (create-maintenance-proposal 
+        (property-id uint)
+        (details (string-ascii 500))
+        (amount uint))
+    (let
+        (
+            (property (unwrap! (map-get? properties property-id) err-not-found))
+            (proposer-shares (get-share-balance property-id tx-sender))
+        )
+        ;; Check if proposer has minimum required shares
+        (asserts! (>= proposer-shares (var-get minimum-shares-for-proposal)) err-minimum-shares)
+        
+        ;; Check if property is not locked
+        (asserts! (not (get locked property)) err-property-locked)
+        
+        ;; Create the proposal
+        (map-set property-proposals property-id
+            {
+                proposer: tx-sender,
+                proposal-type: "MAINTENANCE",
+                details: details,
+                amount: amount,
+                votes-for: u0,
+                votes-against: u0,
+                end-height: (+ block-height (var-get proposal-duration)),
+                executed: false
+            })
+        
+        (ok true)
+    )
+)
