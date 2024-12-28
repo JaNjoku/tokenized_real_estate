@@ -80,3 +80,41 @@
     {property-id: uint, month: uint}
     uint
 )
+
+
+;; Read only functions
+
+(define-read-only (get-property-details (property-id uint))
+    (map-get? properties property-id)
+)
+
+(define-read-only (get-share-balance (property-id uint) (holder principal))
+    (default-to u0
+        (map-get? share-holdings {property-id: property-id, holder: holder})
+    )
+)
+
+(define-read-only (get-platform-fee)
+    (var-get platform-fee)
+)
+
+(define-read-only (get-active-proposal (property-id uint))
+    (map-get? property-proposals property-id)
+)
+
+(define-read-only (get-maintenance-history (property-id uint))
+    (map-get? property-maintenance property-id)
+)
+
+(define-read-only (calculate-share-value (property-id uint))
+    (let
+        (
+            (property (unwrap! (map-get? properties property-id) err-not-found))
+            (total-rental-income (get rental-income property))
+            (maintenance-costs (get total-spent (default-to 
+                {last-service-date: u0, total-spent: u0, service-history: (list)}
+                (map-get? property-maintenance property-id))))
+        )
+        (ok (/ (- (get price property) maintenance-costs) (get total-shares property)))
+    )
+)
