@@ -232,3 +232,75 @@
         (ok true)
     )
 )
+
+
+(define-public (vote-on-proposal (property-id uint) (vote-for bool))
+    (let
+        (
+            (proposal (unwrap! (map-get? property-proposals property-id) err-no-active-proposal))
+            (voter-shares (get-share-balance property-id tx-sender))
+        )
+        (asserts! (< block-height (get end-height proposal)) err-proposal-expired)
+        (asserts! (not (default-to false (map-get? votes {property-id: property-id, voter: tx-sender}))) err-already-voted)
+        
+        ;; Record the vote
+        (map-set votes {property-id: property-id, voter: tx-sender} true)
+        
+        ;; Update vote counts based on share weight
+        (if vote-for
+            (map-set property-proposals property-id
+                (merge proposal {votes-for: (+ (get votes-for proposal) voter-shares)}))
+            (map-set property-proposals property-id
+                (merge proposal {votes-against: (+ (get votes-against proposal) voter-shares)}))
+        )
+        (ok true)
+    )
+)
+
+(define-public (update-property-price (property-id uint) (new-price uint))
+    (let
+        (
+            (property (unwrap! (map-get? properties property-id) err-not-found))
+        )
+        (asserts! (is-eq tx-sender (get owner property)) err-unauthorized)
+        (asserts! (> new-price u0) err-invalid-price)
+        
+        (map-set properties property-id
+            (merge property {price: new-price}))
+        
+        (ok true)
+    )
+)
+
+
+(define-public (buy-shares (property-id uint) (share-amount uint))
+    (let
+        (
+            (property (unwrap! (map-get? properties property-id) err-not-found))
+            (price-per-share (/ (get price property) (get total-shares property)))
+            (total-cost (* price-per-share share-amount))
+            (fee (/ (* total-cost (var-get platform-fee)) u1000))
+            (seller-amount (- total-cost fee))
+            (buyer-current-shares (get-share-balance property-id tx-sender))
+        )
+        (asserts! (get listed property) err-not-listed)
+        (asserts! (>= (get available-shares property) share-amount) err-insufficient-funds)
+        (asserts! (not (get locked property)) err-property-locked)
+        
+        ;; Transfer STX payment
+        (try! (stx-transfer? total-cost tx-sender (get owner property)))
+        (try! (stx-transfer? fee tx-sender contract-owner))
+        
+        ;; Update share balances
+        (map-set share-holdings 
+            {property-id: property-id, holder: tx-sender}
+            (+ buyer-current-shares share-amount))
+        
+        ;; Update available shares
+        (map-set properties property-id
+            (merge property 
+                {available-shares: (- (get available-shares property) share-amount)}))
+        
+        (ok true)
+    )
+)
