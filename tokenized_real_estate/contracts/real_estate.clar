@@ -331,7 +331,7 @@
         )
         (asserts! (is-eq tx-sender contract-owner) err-owner-only)
         (map-set properties property-id 
-            (merge property {locked: true}))  ;; Remove try! here
-        (ok true)  ;; This is already a response type
+            (merge property {locked: true}))  
+        (ok true)  
     )
 )
